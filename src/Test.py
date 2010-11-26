@@ -25,4 +25,5 @@ class Test(Database):
         self.tTags_position = self.tTags.createColumn('position', self.tText, nullable=False, defaultValue=1, preventZero=True)
         self.tTags.createPrimaryKey([self.tTags_id,])
         self.tTags.createUniqueConstraint([self.tTags_parentId, self.tTags_name])
+        self.tTags.createAuditTable(self.schemaAudit)
         

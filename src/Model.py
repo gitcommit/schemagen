@@ -48,6 +48,10 @@ class Table(InSchemaComponent):
         self.foreignKeys = {}
         self.referencingForeignKeys = {}
         self.primaryKey = None
+        self.auditTable = None
+    def createAuditTable(self, auditSchema):
+        self.auditTable = AuditTable(auditSchema, self)
+        return self.auditTable
     def createColumn(self, name, primitiveType, nullable=True, 
                  sequence=None, defaultText=None, defaultValue=None, defaultConstant=None,
                  preventEmptyText=False, preventZero=False, referencedColumn=None):
@@ -101,6 +105,30 @@ class Table(InSchemaComponent):
             cdefs.extend(self.column(n).create())
         return ['CREATE TABLE {tn}(\n\t{coldefs}\n);'.format(tn=self.qualifiedName(),
                                                              coldefs=',\n\t'.join(cdefs))]
+class AuditTable(Table):
+    def __init__(self, auditSchema, tableToAudit):
+        Table.__init__(self, auditSchema, tableToAudit.name)
+        self.tableToAudit = tableToAudit
+        for cn in tableToAudit.columnSequence:
+            c = tableToAudit.column(cn)
+            self.createColumn(c.name, c.type)
+        self.createAuditColumns()
+    def createAuditColumns(self):
+        self.userCol = self.createColumn('db_user', 
+                                         self.schema.database.primitiveType('text'), 
+                                         nullable=False,
+                                         defaultConstant=self.schema.database.databaseConstant('current_user'))
+        self.tsCol = self.createColumn('ts',
+                                       self.schema.database.primitiveType('timestamp'),
+                                       nullable=False,
+                                       defaultConstant=self.schema.database.databaseConstant('current_timestamp'))
+        self.versionCol = self.createColumn('vers',
+                                            self.schema.database.primitiveType('integer'),
+                                            nullable=False,
+                                            defaultValue=1)
+        self.opCol = self.createColumn('op',
+                                       self.schema.database.primitiveType('text'),
+                                       nullable=False)
 class InTableComponent(Component):
     def __init__(self, table, name):
         Component.__init__(self, name)
