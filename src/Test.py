@@ -1,45 +1,83 @@
-from Model import Database, PrimitiveType, Schema, Sequence, Table, DatabaseConstant,\
-    OrderStatement
+from Model import Database, Schema, Sequence, Table, OrderStatement
+from sqlalchemy.engine.ddl import SchemaDropper
 
 class Test(Database):
     def __init__(self):
         Database.__init__(self, 'db')
-        self.tInt = PrimitiveType(self, 'integer')
-        self.tNumeric = PrimitiveType(self, 'numeric')
-        self.tText = PrimitiveType(self, 'text')
-        self.tDate = PrimitiveType(self, 'date')
-        self.tTime = PrimitiveType(self, 'time')
-        self.tTimestamp = PrimitiveType(self, 'timestamp')
-        
-        self.cNULL = DatabaseConstant(self, 'null')
-        self.cCurrentUser = DatabaseConstant(self, 'current_user')
-        self.cCurrentTimestamp = DatabaseConstant(self, 'current_timestamp')
         
         self.schemaData = Schema(self, 'data')
         self.schemaAudit = Schema(self, 'audit')
         self.schemaLogic = Schema(self, 'logic')
         
-        self.seqTags = Sequence(self.schemaData, 'seq_tags')
-        self.tTags = Table(self.schemaData, 'tags')
-        self.tTags_id = self.tTags.createColumn('id', self.tInt, nullable=False, sequence=self.seqTags)
-        self.tTags_parentId = self.tTags.createColumn('parent_id', self.tInt, nullable=True, defaultConstant=self.cNULL, referencedColumn=self.tTags_id)
-        self.tTags_name = self.tTags.createColumn('name', self.tText, nullable=False, defaultText='New Tag', preventEmptyText=True)
-        self.tTags_description = self.tTags.createColumn('description', self.tText, nullable=False, defaultText='')
-        self.tTags_position = self.tTags.createColumn('position', self.tInt, nullable=False, defaultValue=1, preventZero=True)
-        self.tTags.createPrimaryKey([self.tTags_id,])
-        self.tTags.createUniqueConstraint([self.tTags_parentId, self.tTags_name])
+        self.createTags()
+        self.createSiPrefixes()
+        self.createUnits()
+        self.createConstants()
+    def createTags(self):
+        self.tTags = self.schemaData.createTable('tags')
+        id = self.tTags.createColumn('id', self.tInt, nullable=False, 
+                                     sequence=self.schemaData.createSequence('seq_tags'))
+        parentId = self.tTags.createColumn('parent_id', self.tInt, nullable=True, defaultConstant=self.cNULL, referencedColumn=id)
+        name = self.tTags.createColumn('name', self.tText, nullable=False, defaultText='New Tag', preventEmptyText=True)
+        description = self.tTags.createColumn('description', self.tText, nullable=False, defaultText='')
+        position = self.tTags.createColumn('position', self.tInt, nullable=False, defaultValue=1, preventZero=True)
+        self.tTags.createPrimaryKey([id,])
+        self.tTags.createUniqueConstraint([parentId, name])
         self.tTags.createAuditTable(self.schemaAudit)
-        self.tTags.createCreateProcedure(self.schemaLogic, 'create_tag', 
-                                         [self.tTags_name, 
-                                          self.tTags_description, 
-                                          self.tTags_parentId,
-                                          self.tTags_position])
-        self.tTags.createUpdateProcedure(self.schemaLogic, 'update_tag',
-                                         [self.tTags_id,
-                                          self.tTags_name, 
-                                          self.tTags_description, 
-                                          self.tTags_parentId,
-                                          self.tTags_position])
-        self.tTags.createDeleteProcedure(self.schemaLogic, 'delete_tag', self.tTags_id)
-        self.tTags.createGetAllProcedure(self.schemaLogic, 'get_all_tags', [OrderStatement(self.tTags_name, True)])
-        
+        self.tTags.createCreateProcedure(self.schemaLogic, 'create_tag', [name, description, parentId, position])
+        self.tTags.createUpdateProcedure(self.schemaLogic, 'update_tag', [id, name, description, parentId, position])
+        self.tTags.createDeleteProcedure(self.schemaLogic, 'delete_tag', id)
+        self.tTags.createGetAllProcedure(self.schemaLogic, 'get_all_tags', [OrderStatement(name, True)])
+    def createSiPrefixes(self):
+        self.tSiPrefixes = self.schemaData.createTable('si_prefixes')
+        id = self.tSiPrefixes.createColumn('id', self.tInt, nullable=False, sequence=self.schemaData.createSequence('seq_si_prefixes'))
+        name = self.tSiPrefixes.createColumn('name', self.tText, nullable=False, preventEmptyText=True, defaultText='New SI Prefix')
+        symbol = self.tSiPrefixes.createColumn('symbol', self.tText, nullable=False, preventEmptyText=True, defaultText='')
+        code = self.tSiPrefixes.createColumn('code', self.tText, nullable=True)
+        description = self.tSiPrefixes.createColumn('description', self.tText, nullable=False, defaultText='')
+        factor = self.tSiPrefixes.createColumn('factor', self.tNumeric, nullable=False, preventValue=0.0)
+        self.tSiPrefixes.createPrimaryKey([id])
+        self.tSiPrefixes.createUniqueConstraint([name])
+        self.tSiPrefixes.createUniqueConstraint([symbol])
+        self.tSiPrefixes.createUniqueConstraint([code])
+        self.tSiPrefixes.createUniqueConstraint([factor])
+        self.tSiPrefixes.createAuditTable(self.schemaAudit)
+        self.tTags.createCreateProcedure(self.schemaLogic, 'create_si_prefix', [name, code, symbol, factor, description])
+        self.tTags.createUpdateProcedure(self.schemaLogic, 'update_si_prefix', [id, name, code, symbol, factor, description])
+        self.tTags.createDeleteProcedure(self.schemaLogic, 'delete_si_prefix', id)
+        self.tTags.createGetAllProcedure(self.schemaLogic, 'get_all_si_prefixes', [OrderStatement(name, True)])
+    def createUnits(self):
+        self.tUnits = self.schemaData.createTable('units')
+        id = self.tUnits.createColumn('id', self.tInt, nullable=False, sequence=self.schemaData.createSequence('seq_units'))
+        base_unit_id = self.tUnits.createColumn('base_unit_id', self.tInt, nullable=True, referencedColumn=id)
+        name = self.tUnits.createColumn('name', self.tText, nullable=False, preventEmptyText=True, defaultText='New Unit')
+        code = self.tUnits.createColumn('code', self.tText, nullable=True)
+        symbol = self.tUnits.createColumn('symbol', self.tText, nullable=False, defaultText='Symbol')
+        prefix_id = self.tUnits.createColumn('si_prefix_id', self.tInt, nullable=True, referencedColumn=self.tSiPrefixes.primaryKey.firstColumn())
+        description = self.tUnits.createColumn('description', self.tText, nullable=False, defaultText='')
+        self.tUnits.createPrimaryKey([id])
+        self.tUnits.createUniqueConstraint([name])
+        self.tUnits.createUniqueConstraint([symbol])
+        self.tUnits.createUniqueConstraint([code])
+        self.tUnits.createAuditTable(self.schemaAudit)
+        self.tUnits.createCreateProcedure(self.schemaLogic, 'create_unit', [name, code, symbol, base_unit_id, prefix_id, description])
+        self.tUnits.createUpdateProcedure(self.schemaLogic, 'update_unit', [id, name, code, symbol, base_unit_id, prefix_id, description])
+        self.tUnits.createDeleteProcedure(self.schemaLogic, 'delete_unit', id)
+        self.tUnits.createGetAllProcedure(self.schemaLogic, 'get_all_si_prefixes', [OrderStatement(name, True)])
+    def createConstants(self):
+        self.tConstants = self.schemaData.createTable('constants')
+        id = self.tConstants.createColumn('id', self.tInt, nullable=False, sequence=self.schemaData.createSequence('seq_constants'))
+        name = self.tConstants.createColumn('name', self.tText, nullable=False, defaultText='New Constant', preventEmptyText=True)
+        code = self.tConstants.createColumn('code', self.tText, nullable=True)
+        symbol = self.tConstants.createColumn('symbol', self.tText, nullable=True)
+        unit_id = self.tConstants.createColumn('unit_id', self.tInt, nullable=True, referencedColumn=self.tUnits.primaryKey.firstColumn())
+        value = self.tConstants.createColumn('numeric_value', self.tNumeric, nullable=False, preventValue=0)
+        self.tConstants.createPrimaryKey([id])
+        self.tConstants.createUniqueConstraint([name])
+        self.tConstants.createUniqueConstraint([code])
+        self.tConstants.createUniqueConstraint([symbol])
+        self.tConstants.createAuditTable(self.schemaAudit)
+        self.tConstants.createCreateProcedure(self.schemaLogic, 'create_constant', [name, code, symbol, value, unit_id])
+        self.tConstants.createUpdateProcedure(self.schemaLogic, 'update_constant', [id, name, code, symbol, value, unit_id])
+        self.tConstants.createDeleteProcedure(self.schemaLogic, 'delete_constant', id)
+        self.tConstants.createGetAllProcedure(self.schemaLogic, 'get_all_constants', [OrderStatement(name, True)])

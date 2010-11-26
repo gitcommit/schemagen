@@ -203,9 +203,9 @@ class Table(InSchemaComponent):
         return self.auditTable
     def createColumn(self, name, primitiveType, nullable=True, 
                  sequence=None, defaultText=None, defaultValue=None, defaultConstant=None,
-                 preventEmptyText=False, preventZero=False, referencedColumn=None):
+                 preventEmptyText=False, preventZero=False, referencedColumn=None, preventValue=None):
         c = Column(self, name, primitiveType, nullable, sequence, defaultText, defaultValue, defaultConstant,
-                   preventEmptyText, preventZero)
+                   preventEmptyText, preventZero, preventValue)
         if referencedColumn is not None:
             ForeignKeyConstraint(localTable=self, 
                                  name='fk_{tn}_{fkn}_exists'.format(tn=self.name.upper(), fkn=referencedColumn.name.upper()),
@@ -388,9 +388,13 @@ class CheckConstraint(Constraint):
 class PreventEmptyTextConstraint(CheckConstraint):
     def __init__(self, table, name, column):
         CheckConstraint.__init__(self, table, name, 'LENGTH({}) > 0'.format(column.name.upper()))
-class PreventZeroConstraint(CheckConstraint):
+class PreventValueConstraint(CheckConstraint):
+    def __init__(self, table, name, column, value):
+        CheckConstraint.__init__(self, table, name, '{v} != {col}'.format(v=value,
+                                                                          col=column.name.upper()))
+class PreventZeroConstraint(PreventValueConstraint):
     def __init__(self, table, name, column):
-        CheckConstraint.__init__(self, table, name, '0 != {}'.format(column.name.upper()))
+        PreventValueConstraint.__init__(self, table, name, column, 0)
 class ForeignKeyConstraint(InTableComponent):
     def __init__(self, localTable, name, localColumns, referencedTable, referencedColumns):
         InTableComponent.__init__(self, localTable, name)
@@ -449,7 +453,7 @@ class Trigger(InTableComponent):
 class Column(InTableComponent):
     def __init__(self, table, name, primitiveType, nullable=True, 
                  sequence=None, defaultText=None, defaultValue=None, defaultConstant=None,
-                 preventEmptyText=False, preventZero=False):
+                 preventEmptyText=False, preventZero=False, preventValue=None):
         InTableComponent.__init__(self, table, name)
         self.type = primitiveType
         self.nullable = nullable
@@ -467,8 +471,14 @@ class Column(InTableComponent):
             PreventEmptyTextConstraint(self.table, 'chk_{}_not_empty'.format(self.name.upper()), self)
         if preventZero:
             PreventZeroConstraint(self.table, 'chk_{}_not_zero'.format(self.name.upper()), self)
+        if preventValue is not None:
+            PreventValueConstraint(self.table, 'chk_{}_not_illegal_value'.format(self.name.upper()), self, preventValue)
     def hasDefault(self):
         return self.default is not None
+    def defaultExpression(self):
+        if not self.hasDefault():
+            return None
+        return self.default.create()
     def create(self):
         buf = '{n} {tn}'.format(n=self.name.upper(),
                                 tn=self.type.qualifiedName())
@@ -486,6 +496,10 @@ class Schema(InDatabaseComponent):
         self.sequences = {}
         self.tables = {}
         self.procedures = {}
+    def createTable(self, name):
+        return Table(self, name)
+    def createSequence(self, name):
+        return Sequence(self, name)
     def createProcedure(self, name):
         return Procedure(self, name)
     def createTriggerProcedure(self, name):
@@ -511,6 +525,19 @@ class Database(Component):
         self.schemas = {}
         self.constants = {}
         self.triggers = {}
+        self.createPrimitives()
+    def createPrimitives(self):
+        self.tInt = PrimitiveType(self, 'integer')
+        self.tNumeric = PrimitiveType(self, 'numeric')
+        self.tText = PrimitiveType(self, 'text')
+        self.tDate = PrimitiveType(self, 'date')
+        self.tTime = PrimitiveType(self, 'time')
+        self.tTimestamp = PrimitiveType(self, 'timestamp')
+        
+        self.cNULL = DatabaseConstant(self, 'null')
+        self.cCurrentUser = DatabaseConstant(self, 'current_user')
+        self.cCurrentTimestamp = DatabaseConstant(self, 'current_timestamp')
+        
     def registerTrigger(self, t):
         self.triggers[t.name] = t
     def trigger(self, name):
