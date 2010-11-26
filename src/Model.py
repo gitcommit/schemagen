@@ -48,6 +48,30 @@ class Table(InSchemaComponent):
         self.foreignKeys = {}
         self.referencingForeignKeys = {}
         self.primaryKey = None
+    def createColumn(self, name, primitiveType, nullable=True, 
+                 sequence=None, defaultText=None, defaultValue=None, defaultConstant=None,
+                 preventEmptyText=False, preventZero=False, referencedColumn=None):
+        c = Column(self, name, primitiveType, nullable, sequence, defaultText, defaultValue, defaultConstant,
+                   preventEmptyText, preventZero)
+        if referencedColumn is not None:
+            ForeignKeyConstraint(localTable=self, 
+                                 name='fk_{tn}_{fkn}_exists'.format(tn=self.name.upper(), fkn=referencedColumn.name.upper()),
+                                 localColumns=[c],
+                                 referencedTable=c.table, referencedColumns=[referencedColumn])
+        return c
+    def createPrimaryKey(self, columns, name=None):
+        n = name
+        if n is None:
+            n = 'pk_{}'.format(self.name)
+        return PrimaryKeyConstraint(self, n, columns)
+    def createUniqueConstraint(self, columns, name=None):
+        n = name
+        if n is None:
+            cn = ['u_{}'.format(self.name.upper())]
+            for c in columns:
+                cn.append(c.name.upper())
+            n = '_'.join(cn)
+        return UniqueConstraint(self, n, columns)
     def registerForeignKey(self, c):
         self.foreignKeys[c.name] = c
     def foreignKey(self, name):

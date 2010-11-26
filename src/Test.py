@@ -1,4 +1,4 @@
-from Model import Database, PrimitiveType, Schema, Sequence, Table, Column, DatabaseConstant, PrimaryKeyConstraint, UniqueConstraint, ForeignKeyConstraint
+from Model import Database, PrimitiveType, Schema, Sequence, Table, DatabaseConstant
 
 class Test(Database):
     def __init__(self):
@@ -19,11 +19,10 @@ class Test(Database):
         
         self.seqTags = Sequence(self.schemaData, 'seq_tags')
         self.tTags = Table(self.schemaData, 'tags')
-        self.tTags_id = Column(self.tTags, 'id', self.tInt, nullable=False, sequence=self.seqTags)
-        self.tTags_parentId = Column(self.tTags, 'parent_id', self.tInt, nullable=True, defaultConstant=self.cNULL)
-        self.tTags_name = Column(self.tTags, 'name', self.tText, nullable=False, defaultText='New Tag', preventEmptyText=True)
-        self.tTags_position = Column(self.tTags, 'position', self.tText, nullable=False, defaultValue=1, preventZero=True)
-        self.tTags_pk = PrimaryKeyConstraint(self.tTags, 'pk_tags', [self.tTags_id,])
-        self.tTags_u = UniqueConstraint(self.tTags, 'u_tags_name', [self.tTags_parentId, self.tTags_name])
-        ForeignKeyConstraint(self.tTags, 'fk_tags_parent_exists', [self.tTags_parentId],
-                             self.tTags, [self.tTags_id])
+        self.tTags_id = self.tTags.createColumn('id', self.tInt, nullable=False, sequence=self.seqTags)
+        self.tTags_parentId = self.tTags.createColumn('parent_id', self.tInt, nullable=True, defaultConstant=self.cNULL, referencedColumn=self.tTags_id)
+        self.tTags_name = self.tTags.createColumn('name', self.tText, nullable=False, defaultText='New Tag', preventEmptyText=True)
+        self.tTags_position = self.tTags.createColumn('position', self.tText, nullable=False, defaultValue=1, preventZero=True)
+        self.tTags.createPrimaryKey([self.tTags_id,])
+        self.tTags.createUniqueConstraint([self.tTags_parentId, self.tTags_name])
+        
