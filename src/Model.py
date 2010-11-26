@@ -4,7 +4,7 @@ class Component(object):
     def qualifiedName(self):
         return self.name.upper()
     def create(self):
-        return ['-- Creation of {} not implemented.'.format(self.name),]        
+        return ['-- Creation of type {} name {} not implemented.'.format(self.__class__.__name__.upper(), self.qualifiedName()),]        
     
 class InDatabaseComponent(Component):
     def __init__(self, database, name):
@@ -31,6 +31,140 @@ class InSchemaComponent(Component):
         self.schema = schema
     def qualifiedName(self):
         return '{}.{}'.format(self.schema.name.upper(), self.name.upper())
+class Procedure(InSchemaComponent):
+    def __init__(self, schema, name, returnTypeText=None):
+        InSchemaComponent.__init__(self, schema, name)
+        self.schema.registerProcedure(self)
+        self.returnTypeText = returnTypeText
+        self.declBuf = []
+        self.paramBuf = []
+        self.bodyBuf = []
+    def addBodyRow(self, row):
+        self.bodyBuf.append(row)
+    def addParameter(self, typeString, name=None, coltype=None):
+        type = typeString
+        if coltype is not None:
+            type = '{}%TYPE'.format(coltype.fullName().upper())
+        if name is not None:
+            self.paramBuf.append('{n} {ts}'.format(n=name.upper(), ts=type.upper()))
+        else:
+            self.paramBuf.append(typeString.upper())
+    def addDeclaration(self, name, typeString=None, coltype=None, defaultValue=None, noDefault=False):
+        tBuf = typeString
+        defExpr = 'NULL'
+        if coltype is not None:
+            tBuf = '{}%TYPE'.format(coltype.fullName().upper())
+        if defaultValue is not None:
+            defExpr = '{}'.format(defaultValue)
+        if noDefault:
+            return self.declBuf.append('{n} {t};'.format(n=name.upper(), t=tBuf))
+        else:
+            self.declBuf.append('{n} {t} DEFAULT {defexpr};'.format(n=name.upper(), t=tBuf, defexpr=defExpr))
+    def create(self):
+        buf = []
+        buf.append('CREATE OR REPLACE FUNCTION {qn} (\n\t{params}\n)'.format(qn=self.qualifiedName(), 
+                                                                             params=',\n\t'.join(self.paramBuf)))
+        buf.append('RETURNS {}'.format(self.returnTypeText))
+        buf.append('AS')
+        buf.append('$$')
+        buf.append('DECLARE')
+        buf.append('\t{}'.format('\n\t'.join(self.declBuf)))
+        buf.append('BEGIN')
+        buf.append('\t{}'.format('\n\t'.join(self.bodyBuf)))
+        buf.append('END;')
+        buf.append('$$ LANGUAGE PLPGSQL;')
+        return ['\n'.join(buf)]
+class TriggerProcedure(Procedure):
+    def __init__(self, schema, name):
+        Procedure.__init__(self, schema, name, returnTypeText='TRIGGER')
+        self.schema.database.registerTrigger(self)
+class CreateProcedure(Procedure):
+    def __init__(self, schema, name, table, columns):
+        Procedure.__init__(self, schema, name, returnTypeText='{}'.format(table.qualifiedName()))
+        self.schema.registerProcedure(self)
+        self.table = table
+        self.idCol = self.table.primaryKey.firstColumn()
+        self.colnames = []
+        self.values = []
+        i = 1
+        self.table.createProcedure = self
+        for c in columns:
+            self.addParameter('{}%TYPE'.format(c.fullName()))
+            self.colnames.append(c.name.upper())
+            self.values.append('${}'.format(i))
+            i += 1
+        self.addDeclaration('new_id', '{}%TYPE'.format(self.table.primaryKey.firstColumn().fullName()))
+        self.addDeclaration('ret', self.table.qualifiedName(), noDefault=True)
+        self.addBodyRow('INSERT INTO {tbl}({cols}) VALUES ({values}) RETURNING {idCol} INTO NEW_ID;'.format(tbl=self.table.qualifiedName(),
+                                                                                                            cols=', '.join(self.colnames),
+                                                                                                            values=', '.join(self.values),
+                                                                                                            idCol=self.idCol.name.upper()))
+        self.addBodyRow('SELECT INTO RET * FROM {tbl} T WHERE T.{idCol} = NEW_ID;'.format(tbl=self.table.qualifiedName(),
+                                                                                          idCol = self.idCol.name.upper()))
+        self.addBodyRow('RETURN RET;')
+class UpdateProcedure(Procedure):
+    def __init__(self, schema, name, table, columns):
+        Procedure.__init__(self, schema, name, returnTypeText='{}'.format(table.qualifiedName()))
+        self.schema.registerProcedure(self)
+        self.table = table
+        self.idCol = self.table.primaryKey.firstColumn()
+        self.kv = []
+        i = 1
+        self.table.updateProcedure = self
+        for c in columns:
+            self.addParameter('{}%TYPE'.format(c.fullName()))
+            if i != 1:
+                self.kv.append('{col}=${ival}'.format(col=c.name.upper(), 
+                                                      ival=i))
+            i += 1
+        self.addDeclaration('ret', self.table.qualifiedName(), noDefault=True)
+        self.addBodyRow('UPDATE {tbl} SET {kv} WHERE {idCol}=$1;'.format(tbl=self.table.qualifiedName(),
+                                                                         kv=', '.join(self.kv),
+                                                                         idCol=self.idCol.name.upper()))
+        self.addBodyRow('SELECT INTO RET * FROM {tbl} T WHERE T.{idCol}=$1;'.format(tbl=self.table.qualifiedName(),
+                                                                                      idCol = self.idCol.name.upper()))
+        self.addBodyRow('RETURN RET;')
+class DeleteProcedure(Procedure):
+    def __init__(self, schema, name, table, columns):
+        Procedure.__init__(self, schema, name, returnTypeText='{}%TYPE'.format(table.primaryKey.firstColumn().fullName().upper()))
+        self.schema.registerProcedure(self)
+        self.table = table
+        self.idCol = self.table.primaryKey.firstColumn()
+        self.kv = []
+        self.table.deleteProcedure = self
+        for c in columns:
+            self.addParameter('{}%TYPE'.format(c.fullName()))
+            
+        self.addBodyRow('DELETE FROM {tbl} WHERE {idCol}=$1;'.format(tbl=self.table.qualifiedName(),
+                                                                     idCol=self.idCol.name.upper()))
+        self.addBodyRow('RETURN $1;')
+class OrderStatement(object):
+    def __init__(self, column, ascending=True):
+        self.column = column
+        self.ascending = ascending
+    def sql(self):
+        if self.ascending:
+            return '{} ASC'.format(self.column.name.upper())
+        return '{} DESC'.format(self.column.name.upper())
+class GetAllProcedure(Procedure):
+    def __init__(self, schema, name, table, orderStmts):
+        Procedure.__init__(self, schema, name, returnTypeText='REFCURSOR')
+        self.schema.registerProcedure(self)
+        self.table = table
+        self.idCol = self.table.primaryKey.firstColumn()
+        self.colnames = []
+        o = []
+        for cn in self.table.columnSequence:
+            self.colnames.append(self.table.column(cn).name.upper())
+        self.table.getAllProcedure = self
+        for ost in orderStmts:
+            o.append(ost.sql())
+        self.addParameter('REFCURSOR', 'CURS')
+            
+        self.addBodyRow('OPEN CURS FOR SELECT {cols} FROM {tbl} ORDER BY {o};'.format(cols=', '.join(self.colnames),
+                                                                                     tbl=self.table.qualifiedName(),
+                                                                                     o=', '.join(o)))
+        self.addBodyRow('RETURN CURS;')
 class Sequence(InSchemaComponent):
     def __init__(self, schema, name):
         InSchemaComponent.__init__(self, schema, name)
@@ -49,8 +183,23 @@ class Table(InSchemaComponent):
         self.referencingForeignKeys = {}
         self.primaryKey = None
         self.auditTable = None
+        self.auditTrigger = None
+        self.createProcedure = None
+        self.updateProcedure = None
+        self.deleteProcedure = None
+        self.getAllProcedure = None
+    def createCreateProcedure(self, schema, name, columns):
+        CreateProcedure(schema, name, self, columns)
+    def createUpdateProcedure(self, schema, name, columns):
+        UpdateProcedure(schema, name, self, columns)
+    def createDeleteProcedure(self, schema, name, primaryKeyColumn):
+        DeleteProcedure(schema, name, self, [primaryKeyColumn])
+    def createGetAllProcedure(self, schema, name, orderStmts):
+        GetAllProcedure(schema, name, self, orderStmts)
     def createAuditTable(self, auditSchema):
         self.auditTable = AuditTable(auditSchema, self)
+        self.auditTrigger = Trigger(self, 'tr_audit_{}'.format(self.name), self.auditTable.triggerProcedure, before=False, 
+                                    onInsert=True, onUpdate=True, onDelete=True)
         return self.auditTable
     def createColumn(self, name, primitiveType, nullable=True, 
                  sequence=None, defaultText=None, defaultValue=None, defaultConstant=None,
@@ -109,10 +258,50 @@ class AuditTable(Table):
     def __init__(self, auditSchema, tableToAudit):
         Table.__init__(self, auditSchema, tableToAudit.name)
         self.tableToAudit = tableToAudit
+        self.triggerProcedure = None
+        self.auditedColumnNames = []
         for cn in tableToAudit.columnSequence:
             c = tableToAudit.column(cn)
+            self.auditedColumnNames.append(c.name.upper())
             self.createColumn(c.name, c.type)
+        
         self.createAuditColumns()
+        self.createTriggerProcedure()
+        
+    def createTriggerProcedure(self):
+        insertColumnNames = []
+        updateColumnNames = []
+        for n in self.auditedColumnNames:
+            insertColumnNames.append('OLD.{}'.format(n))
+            updateColumnNames.append('NEW.{}'.format(n))
+        self.triggerProcedure = self.schema.createTriggerProcedure('audit_{}'.format(self.name))
+        self.triggerProcedure.addDeclaration('NEW_VERSION', coltype=self.versionCol, defaultValue=1)
+        self.triggerProcedure.addBodyRow("IF ('DELETE' = TG_OP OR 'UPDATE' = TG_OP) THEN")
+        self.triggerProcedure.addBodyRow("\tSELECT INTO NEW_VERSION MAX({versCol}) + 1 FROM {auditT} T WHERE T.{pkCol}=OLD.{pkCol};".format(versCol=self.versionCol.name.upper(),
+                                                                                                                                           auditT=self.qualifiedName(),
+                                                                                                                                           pkCol=self.tableToAudit.primaryKey.firstColumn().name.upper()))
+
+        self.triggerProcedure.addBodyRow("END IF;")
+        self.triggerProcedure.addBodyRow("IF ('DELETE' = TG_OP) THEN")
+        self.triggerProcedure.addBodyRow("\tINSERT INTO {auditT}({auditCols}, {versCol}, {opCol}) VALUES ({insertCols}, {vers}, TG_OP);".format(auditT=self.qualifiedName(),
+                                                                                                                                               auditCols=', '.join(self.auditedColumnNames),
+                                                                                                                                               versCol=self.versionCol.name.upper(),
+                                                                                                                                               opCol=self.opCol.name.upper(),
+                                                                                                                                               insertCols=', '.join(insertColumnNames),
+                                                                                                                                               vers='NEW_VERSION'))
+        self.triggerProcedure.addBodyRow('RETURN OLD;')
+        self.triggerProcedure.addBodyRow("END IF;")
+        
+        self.triggerProcedure.addBodyRow("IF ('UPDATE' = TG_OP OR 'INSERT' = TG_OP) THEN")
+        self.triggerProcedure.addBodyRow("\tINSERT INTO {auditT}({auditCols}, {versCol}, {opCol}) VALUES ({insertCols}, {vers}, TG_OP);".format(auditT=self.qualifiedName(),
+                                                                                                                                               auditCols=', '.join(self.auditedColumnNames),
+                                                                                                                                               versCol=self.versionCol.name.upper(),
+                                                                                                                                               opCol=self.opCol.name.upper(),
+                                                                                                                                               insertCols=', '.join(updateColumnNames),
+                                                                                                                                               vers='NEW_VERSION'))
+        
+        self.triggerProcedure.addBodyRow("END IF;")
+        self.triggerProcedure.addBodyRow("RETURN NULL; -- result is ignored since this is an AFTER trigger")
     def createAuditColumns(self):
         self.userCol = self.createColumn('db_user', 
                                          self.schema.database.primitiveType('text'), 
@@ -165,6 +354,10 @@ class Constraint(InTableComponent):
         InTableComponent.__init__(self, table, name)
         self.type = type
         self.columns = columns
+    def firstColumn(self):
+        if len(self.columns) != 1:
+            return 'Constraint.firstColumn(): more or less than one column in constraint ',self.qualifiedName()
+        return self.columns[0]
     def columnNames(self):
         buf = []
         for c in self.columns:
@@ -224,6 +417,35 @@ class ForeignKeyConstraint(InTableComponent):
                                                                                                             lcn=', '.join(self.localColumnNames()),
                                                                                                             rtn=self.referencedTable.qualifiedName(),
                                                                                                             rcn=', '.join(self.referencedColumnNames()))]
+class Trigger(InTableComponent):
+    def __init__(self, table, name, triggerProcedure, before=False, onInsert=True, onUpdate=True, onDelete=True):
+        InTableComponent.__init__(self, table, name)
+        self.table.schema.database.registerTrigger(self)
+        self.triggerProcedure = triggerProcedure
+        self.table = table
+        self.before = before
+        self.onInsert = onInsert
+        self.onUpdate = onUpdate
+        self.onDelete = onDelete
+    def create(self):
+        befaft = 'NOT_DEFINED'
+        act = []
+        if self.before:
+            befaft = 'BEFORE'
+        if not self.before:
+            befaft = 'AFTER'
+        if self.onInsert:
+            act.append('INSERT')
+        if self.onUpdate:
+            act.append('UPDATE')
+        if self.onDelete:
+            act.append('DELETE')
+        return ['CREATE TRIGGER {tn} {beforeAfter} {actions} ON {tbl} FOR EACH ROW EXECUTE PROCEDURE {proc}();'.format(tn=self.name.upper(),
+                                                                                                                       beforeAfter=befaft,
+                                                                                                                       actions=' OR '.join(act),
+                                                                                                                       tbl=self.table.qualifiedName(),
+                                                                                                                       proc=self.triggerProcedure.qualifiedName())]
+        
 class Column(InTableComponent):
     def __init__(self, table, name, primitiveType, nullable=True, 
                  sequence=None, defaultText=None, defaultValue=None, defaultConstant=None,
@@ -255,12 +477,23 @@ class Column(InTableComponent):
         if self.hasDefault():
             buf += ' {0}'.format(self.default.create())
         return [buf,]
+    def fullName(self):
+        return '{}.{}.{}'.format(self.table.schema.name, self.table.name, self.name)
 class Schema(InDatabaseComponent):
     def __init__(self, database, name):
         InDatabaseComponent.__init__(self, database, name)
         self.database.registerSchema(self)
         self.sequences = {}
         self.tables = {}
+        self.procedures = {}
+    def createProcedure(self, name):
+        return Procedure(self, name)
+    def createTriggerProcedure(self, name):
+        return TriggerProcedure(self, name)
+    def registerProcedure(self, p):
+        self.procedures[p.name] = p 
+    def procedure(self, name):
+        return self.procedure[name]
     def registerTable(self, t):
         self.tables[t.name] = t
     def table(self, name):
@@ -277,6 +510,11 @@ class Database(Component):
         self.primitiveTypes = {}
         self.schemas = {}
         self.constants = {}
+        self.triggers = {}
+    def registerTrigger(self, t):
+        self.triggers[t.name] = t
+    def trigger(self, name):
+        return self.triggers[name]
     def registerDatabaseConstant(self, c):
         self.constants[c.name] = c 
     def databaseConstant(self, name):
@@ -290,7 +528,9 @@ class Database(Component):
     def schema(self, name):
         return self.schemas[name]
     def create(self):
-        ret = ['-- CREATE DATABASE {};'.format(self.name.upper())]
+        ret = ['ROLLBACK;',
+               'BEGIN;',
+               '-- CREATE DATABASE {};'.format(self.name.upper())]
         for pt in self.primitiveTypes.values():
             ret.extend(pt.create())
         for schema in self.schemas.values():
@@ -309,4 +549,15 @@ class Database(Component):
             for table in schema.tables.values():
                 for fk in table.foreignKeys.values():
                     ret.extend(fk.create())
+        for schema in self.schemas.values():
+            for procedure in schema.procedures.values():
+                ret.extend(procedure.create())
+        for trigger in self.triggers.values():
+            ret.extend(trigger.create())
+        ret.append("SELECT * FROM LOGIC.CREATE_TAG('foo', 'bar', NULL, 1);")
+        ret.append("SELECT * FROM LOGIC.UPDATE_TAG(1, 'foobar', 'barfo', NULL, 1);")
+        ret.append("SELECT * FROM LOGIC.DELETE_TAG(1);")
+        ret.append("SELECT LOGIC.GET_ALL_TAGS('all_tags');")
+        ret.append("FETCH ALL IN ALL_TAGS;")
+        ret.append("CLOSE ALL_TAGS;")
         return ret
