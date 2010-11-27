@@ -1,0 +1,2 @@
+This is an experimental package to generate fully audited databases from an abstract description in python.
+Generating a CRUD fat client in C++ and Qt will be the next steps to be implemented.
