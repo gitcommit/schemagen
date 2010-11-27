@@ -1,6 +1,6 @@
 from Model import Database, Schema, OrderStatement
 
-class Test(Database):
+class GLTModel(Database):
     def __init__(self):
         Database.__init__(self, 'db')
         

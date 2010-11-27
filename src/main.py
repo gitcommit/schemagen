@@ -1,7 +1,7 @@
-from Test import Test
+from GLTModel import GLTModel
 
 if '__main__' == __name__:
-    t = Test()
+    t = GLTModel()
     crebas = t.create()
     crebas.extend(t.tests())
         
