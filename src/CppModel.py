@@ -51,7 +51,7 @@ class Field(Element):
 	def varInit(self):
 		return '{var}({param})'.format(var=self.localVarName(), param=self.methodParamName())
 	def isSetDecl(self):
-		return 'virtual bool {cn}::{fn}() const;'.format(cn=self.class_.name, fn=self.isSetName)
+		return 'virtual bool {fn}() const;'.format(fn=self.isSetName)
 	def isSetImpl(self):
 		ret = ['bool {cn}::{fn}() const {{'.format(cn=self.class_.name,
 														fn=self.isSetName),
@@ -95,6 +95,7 @@ class Class(Element):
 	def create(self):
 		if not self.hasTable():
 			raise RuntimeError('{cn}: table is not set'.format(cn=self.__class__.__name__))
+		print('Processing Class <{cn}> mapped to table <{t}>...'.format(cn=self.name, t=self.table.qualifiedName()))
 		path = self.module.fullPath()
 		self.createHeader(path)
 		self.createImplementation(path)
@@ -288,5 +289,4 @@ class Model(Element):
 		if not os.path.isdir(self.basedir):
 			raise RuntimeError('Path <{}> is not a directory.'.format(self.basedir))
 		for module in self.modules.values():
-			print('processing: {}'.format(module.pathBelowBasedir()))
 			module.create()

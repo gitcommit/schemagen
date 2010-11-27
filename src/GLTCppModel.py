@@ -30,12 +30,12 @@ class GLTCppModel(Model):
         self.cSIPrefix = self.configureSiPrefix(table=self.dbModel.schemaCore.table('si_prefixes'))
     def configureSiPrefix(self, table):
         c = self.src_core.createClass('SIPrefix', table)
-        c.createField(table.column('id'), 'setId', 'id')
-        c.createField(table.column('name'), 'setName', 'name')
-        c.createField(table.column('code'), 'setCode', 'code')
-        c.createField(table.column('symbol'), 'setSymbol', 'symbol')
-        c.createField(table.column('factor'), 'setFactor', 'factor')
-        c.createField(table.column('description'), 'setDescription', 'description')
+        c.createField(table.column('id'), 'setId', 'id', 'hasId', ' > 0')
+        c.createField(table.column('name'), 'setName', 'name', 'hasName', '.length() > 0')
+        c.createField(table.column('code'), 'setCode', 'code', 'hasCode', '.length() > 0')
+        c.createField(table.column('symbol'), 'setSymbol', 'symbol', 'hasSymbol', '.length() > 0')
+        c.createField(table.column('factor'), 'setFactor', 'factor', 'hasFactor', ' != 0.0')
+        c.createField(table.column('description'), 'setDescription', 'description', '.length() > 0')
         return c
     def configureGeology(self):
         self.cProfileType = self.configureProfileTypes(self.dbModel.schemaGeology.table('profile_types'))
