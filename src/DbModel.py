@@ -5,7 +5,8 @@ class Component(object):
         return self.name.upper()
     def create(self):
         return ['-- Creation of type {} name {} not implemented.'.format(self.__class__.__name__.upper(), self.qualifiedName()),]        
-    
+    def debug(self, msg):
+        print('SQL Generation: {}'.format(msg))
 class InDatabaseComponent(Component):
     def __init__(self, database, name):
         Component.__init__(self, name)
@@ -424,6 +425,7 @@ class ForeignKeyConstraint(InTableComponent):
 class Trigger(InTableComponent):
     def __init__(self, table, name, triggerProcedure, before=False, onInsert=True, onUpdate=True, onDelete=True):
         InTableComponent.__init__(self, table, name)
+        self.table = table
         self.table.schema.database.registerTrigger(self)
         self.triggerProcedure = triggerProcedure
         self.table = table
@@ -564,27 +566,37 @@ class Database(Component):
                'BEGIN;',
                '-- CREATE DATABASE {};'.format(self.name.upper())]
         for pt in self.primitiveTypes.values():
+            self.debug('declaring primitive type {}'.format(pt.qualifiedName()))
             ret.extend(pt.create())
         for schema in self.schemas.values():
+            self.debug('creating schema {}'.format(schema.qualifiedName()))
             ret.extend(schema.create())
             for sequence in schema.sequences.values():
+                self.debug('creating sequence {}'.format(sequence.qualifiedName()))
                 ret.extend(sequence.create())
             for table in schema.tables.values():
+                self.debug('creating table {}'.format(table.qualifiedName()))
                 ret.extend(table.create())
                 if table.hasPrimaryKey():
+                    self.debug('creating primary key {}'.format(table.primaryKey.qualifiedName()))
                     ret.extend(table.primaryKey.create())
                 for uc in table.uniqueConstraints.values():
+                    self.debug('creating unique constraint {}'.format(uc.qualifiedName()))
                     ret.extend(uc.create())
                 for cc in table.checkConstraints.values():
+                    self.debug('creating check constraint {}'.format(cc.qualifiedName()))
                     ret.extend(cc.create())
         for schema in self.schemas.values():
             for table in schema.tables.values():
                 for fk in table.foreignKeys.values():
+                    self.debug('creating foreign key constraint {fk} on table {t}'.format(fk=fk.qualifiedName(), t=fk.table.qualifiedName()))
                     ret.extend(fk.create())
         for schema in self.schemas.values():
             for procedure in schema.procedures.values():
+                self.debug('creating procedure {}'.format(procedure.qualifiedName()))
                 ret.extend(procedure.create())
         for trigger in self.triggers.values():
+            self.debug('creating trigger {}'.format(trigger.qualifiedName()))
             ret.extend(trigger.create())
         ret.extend(self.tests())
         return ret

@@ -7,6 +7,8 @@ class Element(object):
 	def create(self):
 		raise RuntimeError('Creation of objects of type <{}> not implemented. aborting.'.format(self.__class__.__name__))
 		sys.exit()
+	def debug(self, msg):
+		print('C++ Generation: {}'.format(msg))
 class CppType(Element):
 	def __init__(self, model, name, includeFile):
 		Element.__init__(self)
@@ -95,7 +97,7 @@ class Class(Element):
 	def create(self):
 		if not self.hasTable():
 			raise RuntimeError('{cn}: table is not set'.format(cn=self.__class__.__name__))
-		print('Processing Class <{cn}> mapped to table <{t}>...'.format(cn=self.name, t=self.table.qualifiedName()))
+		self.debug('Processing Class <{cn}> mapped to table <{t}>...'.format(cn=self.name, t=self.table.qualifiedName()))
 		path = self.module.fullPath()
 		self.createHeader(path)
 		self.createImplementation(path)
@@ -127,42 +129,53 @@ class Class(Element):
 	def dataVariableDeclarations(self):
 		ret = []
 		for f in self.fields:
-			ret.append(f.varDecl())
+			d = f.varDecl()
+			self.debug('declaring member variable {}'.format(d))
+			ret.append(d)
 		return ret
 	def isSetDeclarations(self):
 		ret = []
 		for f in self.fields:
 			if f.hasIsSetTest():
-				ret.append(f.isSetDecl())
+				t = f.isSetDecl()
+				self.debug('declaring is set test {}'.format(t))
+				ret.append(t)
 		return ret
 	def isSetImplementations(self):
 		ret = []
 		for f in self.fields:
 			if f.hasIsSetTest():
+				self.debug('implementing is set test...')
 				ret.append(f.isSetImpl())
 		return ret
 	def setterDeclarations(self):
 		ret = []
 		for f in self.fields:
 			if f.hasSetter():
-				ret.append(f.setterDecl())
+				s = f.setterDecl()
+				self.debug('declaring setter {}'.format(s))
+				ret.append(s)
 		return ret
 	def setterImplementations(self):
 		ret = []
 		for f in self.fields:
 			if f.hasSetter():
+				self.debug('implementing setter...')
 				ret.append(f.setterImpl())
 		return ret
 	def getterDeclarations(self):
 		ret = []
 		for f in self.fields:
 			if f.hasGetter():
-				ret.append(f.getterDecl())
+				g = f.getterDecl()
+				self.debug('declaring getter {}'.format(g))
+				ret.append(g)
 		return ret
 	def getterImplementations(self):
 		ret = []
 		for f in self.fields:
 			if f.hasGetter():
+				self.debug('implementing getter...')
 				ret.append(f.getterImpl())
 		return ret
 	
@@ -285,8 +298,10 @@ class Model(Element):
 		return self.basedir
 	def create(self):
 		if not os.path.exists(self.basedir):
-			raise RuntimeError('Path <{}> does not exist. Create it before running this code generator.'.format(self.basedir))
+			msg = 'Path <{}> does not exist. Create it before running this code generator.'.format(self.basedir)
+			raise RuntimeError(msg)
 		if not os.path.isdir(self.basedir):
-			raise RuntimeError('Path <{}> is not a directory.'.format(self.basedir))
+			msg = 'Path <{}> is not a directory.'.format(self.basedir)
+			raise RuntimeError(msg)
 		for module in self.modules.values():
 			module.create()
