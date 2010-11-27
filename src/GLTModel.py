@@ -1,4 +1,4 @@
-from Model import Database, Schema, OrderStatement
+from DbModel import Database, Schema, OrderStatement
 
 class GLTModel(Database):
     def __init__(self):
