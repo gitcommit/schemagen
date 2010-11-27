@@ -526,6 +526,11 @@ class Database(Component):
         self.constants = {}
         self.triggers = {}
         self.createPrimitives()
+        self.testQueries = []
+    def addTest(self, sql):
+        self.testQueries.append(sql)
+    def tests(self):
+        return self.testQueries
     def createPrimitives(self):
         self.tInt = PrimitiveType(self, 'integer')
         self.tNumeric = PrimitiveType(self, 'numeric')
@@ -581,10 +586,5 @@ class Database(Component):
                 ret.extend(procedure.create())
         for trigger in self.triggers.values():
             ret.extend(trigger.create())
-        ret.append("SELECT * FROM LOGIC.CREATE_TAG('foo', 'bar', NULL, 1);")
-        ret.append("SELECT * FROM LOGIC.UPDATE_TAG(1, 'foobar', 'barfo', NULL, 1);")
-        ret.append("SELECT * FROM LOGIC.DELETE_TAG(1);")
-        ret.append("SELECT LOGIC.GET_ALL_TAGS('all_tags');")
-        ret.append("FETCH ALL IN ALL_TAGS;")
-        ret.append("CLOSE ALL_TAGS;")
+        ret.extend(self.tests())
         return ret
