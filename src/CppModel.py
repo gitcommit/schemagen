@@ -19,6 +19,66 @@ class FieldType(Element):
 		Element.__init__(self)
 		self.databaseType = databaseType
 		self.cppType = cppType
+class Field(Element):
+	def __init__(self, model, module, class_, dbCol, setterName, getterName, isSetName=None, isSetTest=None):
+		Element.__init__(self)
+		self.model = model
+		self.module = module
+		self.class_ = class_
+		self.dbCol = dbCol
+		self.setterName = setterName
+		self.getterName = getterName
+		self.isSetName = isSetName
+		self.isSetTest = isSetTest
+	def hasGetter(self):
+		return len(self.getterName) > 0
+	def hasSetter(self):
+		return len(self.setterName) > 0
+	def hasIsSetTest(self):
+		if self.isSetName is None or self.isSetTest is None:
+			return False
+		return len(self.isSetName) > 0
+	def cppType(self):
+		return self.model.cppTypeFromDbCol(self.dbCol)
+	def methodParamName(self):
+		return self.dbCol.name
+	def paramDecl(self):
+		return 'const {cppType}& {coln}'.format(cppType=self.cppType().name, coln=self.methodParamName())
+	def localVarName(self):
+		return '{coln}_'.format(coln=self.dbCol.name)
+	def varDecl(self):
+		return '{cppType} {varName};'.format(cppType=self.cppType().name, varName=self.localVarName())
+	def varInit(self):
+		return '{var}({param})'.format(var=self.localVarName(), param=self.methodParamName())
+	def isSetDecl(self):
+		return 'virtual bool {cn}::{fn}() const;'.format(cn=self.class_.name, fn=self.isSetName)
+	def isSetImpl(self):
+		ret = ['bool {cn}::{fn}() const {{'.format(cn=self.class_.name,
+														fn=self.isSetName),
+				'\t return ({getter}{exp});'.format(getter=self.getterName, exp=self.isSetTest),
+				'}']
+		return '\n'.join(ret)
+	def setterDecl(self):
+		return 'virtual void {sn}({pdecl}) const;'.format(cppType=self.cppType().name,
+														sn=self.setterName, 
+														pdecl=self.paramDecl())
+	def setterImpl(self):
+		ret = ['void {cln}::{sn}({pdecl}) {{'.format(cln=self.class_.name,
+													sn=self.setterName,
+													pdecl=self.paramDecl()),
+				'\t{var} = {parmn};'.format(var=self.localVarName(),
+										parmn=self.methodParamName()),
+				'}']
+		return '\n'.join(ret)
+	def getterDecl(self):
+		return 'virtual {cppType} {gn}() const;'.format(cppType=self.cppType().name, gn=self.getterName)
+	def getterImpl(self):
+		ret = ['{cppType} {cn}::{gn}() const {{'.format(cppType=self.cppType().name,
+													cn=self.class_.name,
+													gn=self.getterName),
+				'\treturn {var};'.format(var=self.localVarName()),
+				'}']
+		return '\n'.join(ret)
 class Class(Element):
 	def __init__(self, model, module, name, table=None):
 		Element.__init__(self)
@@ -27,48 +87,84 @@ class Class(Element):
 		self.name = name
 		self.module.registerClass(self)
 		self.table = table
+		self.fields = []
+	def createField(self, dbCol, setterName, getterName, isSetTest=None, isSetExpression=None):
+		f = Field(self.model, self.module, self, dbCol, setterName, getterName, isSetTest, isSetExpression)
+		self.fields.append(f)
+		return f
 	def create(self):
+		if not self.hasTable():
+			raise RuntimeError('{cn}: table is not set'.format(cn=self.__class__.__name__))
 		path = self.module.fullPath()
 		self.createHeader(path)
 		self.createImplementation(path)
+	def ctorArguments(self):
+		ret = []
+		for f in self.fields:
+			ret.append(f.paramDecl())
+		return ret
 	def ctorDeclaration(self):
 		return '{cn}({vars});'.format(cn=self.name, vars=', '.join(self.ctorArguments()))
+	def ctorImplementation(self):
+		ret = ['{cn}::{cn}({vars}):'.format(cn=self.name, vars=', '.join(self.ctorArguments())),
+				'\tEntity(),',
+				'\t{}'.format(',\n\t'.join(self.varInitList())),
+				'{ }']
+		return '\n'.join(ret)
 	def dtorDeclaration(self):
 		return 'virtual ~{cn}();'.format(cn=self.name)
+	def dtorImplementation(self):
+		ret = ['{cn}::~{cn}() {{ }}'.format(cn=self.name)]
+		return '\n'.join(ret)
 	def hasTable(self):
 		return self.table is not None
-	def ctorArguments(self):
-		if not self.hasTable():
-			raise RuntimeError('{cn}: table is not set'.format(cn=self.__class__.__name__))
-		ret = []
-		for colName in self.table.columnSequence:
-			col = self.table.column(colName)
-			ret.append('const {cppType}& {coln}'.format(cppType=self.cppTypeFromDbCol(col).name, 
-														coln=self.createMethodParamName(col)))
-		return ret
 	def varInitList(self):
-		if not self.hasTable():
-			raise RuntimeError('{cn}: table is not set'.format(cn=self.__class__.__name__))
 		ret = []
-		for colName in self.table.columnSequence:
-			col = self.table.column(colName)
-			ret.append('{var}({param})'.format(var=self.createLocalVarName(col), param=self.createMethodParamName(col)))
+		for f in self.fields:
+			ret.append(f.varInit())
 		return ret
-	def cppTypeFromDbCol(self, dbCol):
-		return self.model.fieldTypeFromDbType(dbCol.type).cppType
-	def createMethodParamName(self, dbCol):
-		return dbCol.name
-	def createLocalVarName(self, dbCol):
-		return '{coln}_'.format(coln=dbCol.name)
 	def dataVariableDeclarations(self):
-		if not self.hasTable():
-			raise RuntimeError('{cn}: table is not set'.format(cn=self.__class__.__name__))
 		ret = []
-		for colName in self.table.columnSequence:
-			col = self.table.column(colName)
-			ret.append('{cppType} {varName};'.format(cppType=self.cppTypeFromDbCol(col).name,
-													varName=self.createLocalVarName(self.table.column(colName))))
+		for f in self.fields:
+			ret.append(f.varDecl())
 		return ret
+	def isSetDeclarations(self):
+		ret = []
+		for f in self.fields:
+			if f.hasIsSetTest():
+				ret.append(f.isSetDecl())
+		return ret
+	def isSetImplementations(self):
+		ret = []
+		for f in self.fields:
+			if f.hasIsSetTest():
+				ret.append(f.isSetImpl())
+		return ret
+	def setterDeclarations(self):
+		ret = []
+		for f in self.fields:
+			if f.hasSetter():
+				ret.append(f.setterDecl())
+		return ret
+	def setterImplementations(self):
+		ret = []
+		for f in self.fields:
+			if f.hasSetter():
+				ret.append(f.setterImpl())
+		return ret
+	def getterDeclarations(self):
+		ret = []
+		for f in self.fields:
+			if f.hasGetter():
+				ret.append(f.getterDecl())
+		return ret
+	def getterImplementations(self):
+		ret = []
+		for f in self.fields:
+			if f.hasGetter():
+				ret.append(f.getterImpl())
+		return ret
+	
 	def createHeader(self, path):
 		buf = ['// automatially generated class declaration for class {}'.format(self.name),
 				'#include <orm/Entity.h>',
@@ -77,6 +173,12 @@ class Class(Element):
 				'public:',
 				'\t{}'.format(self.ctorDeclaration()),
 				'\t{}'.format(self.dtorDeclaration()),
+				'',
+				'\t{}'.format('\n\t'.join(self.isSetDeclarations())),
+				'',
+				'\t{}'.format('\n\t'.join(self.setterDeclarations())),
+				'',
+				'\t{}'.format('\n\t'.join(self.getterDeclarations())),
 				'protected:',
 				'private:',
 				'\t{}'.format('\n\t'.join(self.dataVariableDeclarations())),
@@ -91,22 +193,18 @@ class Class(Element):
 				self.ctorImplementation(),
 				'',
 				self.dtorImplementation(),
-				'']
+				'',
+				'\n\n'.join(self.isSetImplementations()),
+				'',
+				'\n\n'.join(self.setterImplementations()),
+				'',
+				'\n\n'.join(self.getterImplementations())]
 		self.writeToFile('{p}/{n}.cpp'.format(p=path, n=self.name), buf)
 	def writeToFile(self, fn, buf):
 		f = open(fn, 'w')
 		f.write('\n'.join(buf))
 		f.write('\n')
 		f.close()
-	def ctorImplementation(self):
-		ret = ['{cn}::{cn}({vars}):'.format(cn=self.name, vars=', '.join(self.ctorArguments())),
-				'\tEntity()',
-				'\t{}'.format(',\n\t'.join(self.varInitList())),
-				'{ }']
-		return '\n'.join(ret)
-	def dtorImplementation(self):
-		ret = ['{cn}::~{cn}() {{ }}'.format(cn=self.name)]
-		return '\n'.join(ret)
 	
 class Module(Element):
 	def __init__(self, model=None, module=None, name=None):
@@ -159,6 +257,8 @@ class Model(Element):
 		self.types = {}
 		self.fieldTypes = []
 		self.dbModel = None
+	def cppTypeFromDbCol(self, dbCol):
+		return self.fieldTypeFromDbType(dbCol.type).cppType
 	def registerType(self, t):
 		self.types[t.name] = t
 	def type(self, name):

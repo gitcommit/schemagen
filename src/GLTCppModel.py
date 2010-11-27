@@ -27,6 +27,22 @@ class GLTCppModel(Model):
         self.createFieldType(self.dbModel.primitiveType('date'), self.type('QDate'))
         self.createFieldType(self.dbModel.primitiveType('timestamp'), self.type('QDateTime'))
     def configureCore(self):
-        self.cSIPrefix = self.src_core.createClass('SIPrefix', table=self.dbModel.schemaCore.table('si_prefixes'))
+        self.cSIPrefix = self.configureSiPrefix(table=self.dbModel.schemaCore.table('si_prefixes'))
+    def configureSiPrefix(self, table):
+        c = self.src_core.createClass('SIPrefix', table)
+        c.createField(table.column('id'), 'setId', 'id')
+        c.createField(table.column('name'), 'setName', 'name')
+        c.createField(table.column('code'), 'setCode', 'code')
+        c.createField(table.column('symbol'), 'setSymbol', 'symbol')
+        c.createField(table.column('factor'), 'setFactor', 'factor')
+        c.createField(table.column('description'), 'setDescription', 'description')
+        return c
     def configureGeology(self):
-        self.cProfileType = self.src_geology.createClass('ProfileType', table=self.dbModel.schemaGeology.table('profile_types'))
+        self.cProfileType = self.configureProfileTypes(self.dbModel.schemaGeology.table('profile_types'))
+    def configureProfileTypes(self, table):
+        c = self.src_geology.createClass('ProfileType', table)
+        c.createField(table.column('id'), 'setId', 'id', 'hasId', ' > 0')
+        c.createField(table.column('name'), 'setName', 'name', 'hasName', '.length() > 0')
+        c.createField(table.column('code'), 'setCode', 'code', 'hasCode', '.length() > 0')
+        c.createField(table.column('description'), 'setDescription', 'description', 'hasDescription', '.length() > 0')
+        return c
